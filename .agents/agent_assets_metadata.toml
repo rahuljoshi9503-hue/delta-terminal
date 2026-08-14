@@ -1,0 +1,9 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "I5P9eKVBo5R7kL0W3Dnp2"
+uri = "file://main.py"
+type = "unspecified"
+title = "Bitcoin price script"
+description = "A simple Python script that fetches the current BTC/USDT price from Binance using ccxt."
