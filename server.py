@@ -128,7 +128,7 @@ def startup_event():
     t3.start()
     print("🚀 All strategy background workers successfully started.")
 
-@app.get("/")
+@app.api_route("/", methods=["GET", "HEAD"])
 def root():
     return {"message": "AI Delta Terminal Server Online", "status": "active"}
 
