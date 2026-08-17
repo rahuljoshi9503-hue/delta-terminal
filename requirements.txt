@@ -6,3 +6,4 @@ google-generativeai
 python-telegram-bot
 uvicorn
 fastapi
+pycryptodome
