@@ -7,3 +7,5 @@ python-telegram-bot
 uvicorn
 fastapi
 pycryptodome
+passlib[bcrypt]
+bcrypt
