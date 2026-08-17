@@ -1,0 +1,184 @@
+# -*- coding: utf-8 -*-
+"""
+Strategy Name: Indicator base Strategy (Fish Tractor Logic)
+Pure Python Version (No Pandas / No Pip Required)
+"""
+
+import time
+import datetime
+import requests
+import math
+
+# ==========================================
+# 1. तुमची Delta Exchange API माहिती
+# ==========================================
+API_KEY = "YOUR_API_KEY"
+API_SECRET = "YOUR_API_SECRET"
+BASE_URL = "https://api.india.delta.exchange"
+SYMBOL = "BTCUSD"
+TIMEFRAME = "5"            # 5 मिनिटे कँडल
+
+# ==========================================
+# 2. इंडिकेटर कॅल्क्युलेशन (Pure Python)
+# ==========================================
+def calculate_indicators(candles):
+    """SMMA 9 आणि SuperTrend (10, 3) कॅल्क्युलेट करणे"""
+    if len(candles) < 20:
+        return None, None, None
+
+    closes = [c['close'] for c in candles]
+    highs = [c['high'] for c in candles]
+    lows = [c['low'] for c in candles]
+
+    # 1. SMMA 9 (RMA in PineScript: alpha = 1/9)
+    alpha_smma = 1.0 / 9.0
+    smma = closes[0]
+    for c in closes[1:]:
+        smma = (alpha_smma * c) + ((1 - alpha_smma) * smma)
+
+    # 2. True Range (TR)
+    tr_list = []
+    for i in range(len(candles)):
+        if i == 0:
+            tr_list.append(highs[i] - lows[i])
+        else:
+            tr = max(
+                highs[i] - lows[i],
+                abs(highs[i] - closes[i-1]),
+                abs(lows[i] - closes[i-1])
+            )
+            tr_list.append(tr)
+
+    # 3. ATR (Length = 10, alpha = 1/10)
+    alpha_atr = 1.0 / 10.0
+    atr_list = [tr_list[0]]
+    for tr in tr_list[1:]:
+        atr_val = (alpha_atr * tr) + ((1 - alpha_atr) * atr_list[-1])
+        atr_list.append(atr_val)
+
+    # 4. SuperTrend (10, 3.0)
+    mult = 3.0
+    upperband = 0.0
+    lowerband = 0.0
+    direction = 1  # 1 = Bearish, -1 = Bullish
+    supertrend_val = 0.0
+
+    for i in range(len(candles)):
+        hl2 = (highs[i] + lows[i]) / 2.0
+        cur_upper = hl2 + (mult * atr_list[i])
+        cur_lower = hl2 - (mult * atr_list[i])
+
+        if i > 0:
+            if closes[i-1] > lowerband:
+                lowerband = max(cur_lower, lowerband)
+            else:
+                lowerband = cur_lower
+
+            if closes[i-1] < upperband:
+                upperband = min(cur_upper, upperband)
+            else:
+                upperband = cur_upper
+
+            if closes[i-1] > upperband:
+                direction = -1  # Bullish
+            elif closes[i-1] < lowerband:
+                direction = 1   # Bearish
+
+        else:
+            lowerband = cur_lower
+            upperband = cur_upper
+
+        supertrend_val = lowerband if direction == -1 else upperband
+
+    return closes[-1], smma, direction, supertrend_val
+
+def is_gamma_risk_zone():
+    """४:०० PM ते ५:३० PM IST वेळ तपासणे"""
+    now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=5, minutes=30)))
+    if (now.hour == 16 and now.minute >= 0) or (now.hour == 17 and now.minute <= 30):
+        return True
+    return False
+
+# ==========================================
+# 3. Delta Exchange API कँडल्स
+# ==========================================
+def get_candles(symbol=SYMBOL, resolution=TIMEFRAME):
+    try:
+        url = f"{BASE_URL}/v2/history/candles"
+        end_time = int(time.time())
+        start_time = end_time - (100 * int(resolution) * 60)
+        params = {"resolution": resolution, "symbol": symbol, "start": start_time, "end": end_time}
+        res = requests.get(url, params=params, timeout=10)
+        if res.status_code == 200:
+            data = res.json().get("result", [])
+            # सॉर्ट करणे
+            data = sorted(data, key=lambda x: x['time'])
+            formatted = []
+            for d in data:
+                formatted.append({
+                    "open": float(d["open"]),
+                    "high": float(d["high"]),
+                    "low": float(d["low"]),
+                    "close": float(d["close"]),
+                    "volume": float(d["volume"])
+                })
+            return formatted
+    except Exception as e:
+        print(f"Data Fetch Error: {e}")
+    return None
+
+# ==========================================
+# 4. मुख्य स्ट्रॅटेजी लूप
+# ==========================================
+current_position = 0  # 0: No trade, 1: Bullish (Sell PE), -1: Bearish (Sell CE)
+
+def run_indicator_base_strategy():
+    global current_position
+    print("\n" + "="*50)
+    print(" 🚀 'Indicator base Strategy' (Pure Python) सुरू...")
+    print("="*50 + "\n")
+
+    while True:
+        try:
+            candles = get_candles(SYMBOL, resolution=TIMEFRAME)
+            if candles and len(candles) >= 20:
+                close, smma, direction, st = calculate_indicators(candles)
+                gamma_risk = is_gamma_risk_zone()
+
+                bullish_tractor = (direction < 0) and (close > smma)
+                bearish_tractor = (direction > 0) and (close < smma)
+
+                curr_time = datetime.datetime.now().strftime('%H:%M:%S')
+                dir_label = "🟢 Bullish" if direction < 0 else "🔴 Bearish"
+                print(f"[{curr_time}] भाव: ${close} | ST: {dir_label} | SMMA 9: {smma:.2f} | Gamma Risk: {gamma_risk}")
+
+                # 1. ENTRIES
+                if current_position == 0 and not gamma_risk:
+                    if bullish_tractor:
+                        print("🟢 [ENTRY SIGNAL] Bullish Tractor: Sell PE")
+                        current_position = 1
+                    elif bearish_tractor:
+                        print("🔴 [ENTRY SIGNAL] Bearish Tractor: Sell CE")
+                        current_position = -1
+
+                # 2. EXITS
+                elif current_position == 1:
+                    if direction > 0 or close <= st or gamma_risk:
+                        reason = "Gamma Exit" if gamma_risk else "PE StopLoss Hit"
+                        print(f"⚠️ [EXIT SIGNAL] Bullish Trade Closed ({reason})")
+                        current_position = 0
+
+                elif current_position == -1:
+                    if direction < 0 or close >= st or gamma_risk:
+                        reason = "Gamma Exit" if gamma_risk else "CE StopLoss Hit"
+                        print(f"⚠️ [EXIT SIGNAL] Bearish Trade Closed ({reason})")
+                        current_position = 0
+
+            time.sleep(15)
+
+        except Exception as e:
+            print(f"लूप एरर: {e}")
+            time.sleep(10)
+
+if __name__ == "__main__":
+    run_indicator_base_strategy()
